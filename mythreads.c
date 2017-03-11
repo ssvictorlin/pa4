@@ -10,29 +10,39 @@
 
 static int MyInitThreadsCalled = 0;	// 1 if MyInitThreads called, else 0
 static int next_avail = 1;
+static int last_created = 0;
 static int current_create = 0;
+static int current_run = 0;
+static int head = 0;
+static int tail = 0;
+
 static struct thread {			// thread table
 	int valid;			// 1 if entry is valid, else 0
 	jmp_buf env;
 	void (*f)();			// current context
 	int p;
+
+	int whoYme;
+
+	int next;
+	int prev;
 } thread[MAXTHREADS];
 
 #define STACKSIZE	65536		// maximum size of thread stack
-
+void deleteFromQueue(int);
+void appendToQueue(int);
 /*	MyInitThreads () initializes the thread package. Must be the first
  *	function called by any user program that uses the thread package.  
  */
 
 void MyInitThreads ()
 {
-	int i;
+	int i, g, h;
 
 	if (MyInitThreadsCalled) {		// run only once
 		Printf ("InitThreads: should be called only once\n");
 		Exit ();
 	}
-
 	for (i = 1; i < MAXTHREADS; i++) {	// initialize thread table
 		char s[i * STACKSIZE];
 
@@ -41,22 +51,27 @@ void MyInitThreads ()
 			Exit ();
 		}
 
-		if (setjmp (thread[i].env) == 0) {
+		if ((g = setjmp (thread[i].env)) == 0) {
 			// do nothing
 		} else {
-			void (*f)() = thread[i].f;
-			int p = thread[i].p;
-			if (setjmp (thread[i].env) == 0) {
+			
+			void (*f)() = thread[g].f;
+			int p = thread[g].p;
+			if ((h = setjmp (thread[g].env)) == 0) {
 				longjmp(thread[current_create].env, current_create);
 			} 
-
-			(*f)(p);
+			
+			thread[h].f(thread[h].p);
 			MyExitThread();
 		}
 		thread[i].valid = 0;
+		thread[i].prev = -1;
+		thread[i].next = -1;
 	}
-
+	//Printf("Thread 0 is initialized...\n");
 	thread[0].valid = 1;			// initialize thread 0
+	thread[0].prev = -1;
+	thread[0].next = -1;
 
 	MyInitThreadsCalled = 1;
 }
@@ -77,6 +92,7 @@ int MyCreateThread (func, param)
 		Exit ();
 	}
 	current_create = MyGetThread();
+	//Printf ("current_create thread is: %d...\n", current_create);
 	if (setjmp(thread[current_create].env) == 0) {
 		// find the available postion to create thread
 		while (1) {
@@ -85,18 +101,23 @@ int MyCreateThread (func, param)
 			} 
 			else {
 				cur = next_avail;
+				last_created = cur;
 				next_avail = (next_avail+1)%10;
+				// append to the tail of the queue
+				thread[tail].next = cur;
+				thread[cur].prev = tail;
+				tail = cur;
+				// mark the entry for the new thread valid
 				thread[cur].valid = 1;
 				thread[cur].f = func;
 				thread[cur].p = param;
+				//Printf ("created thread is: %d...\n", cur);
 				longjmp(thread[cur].env, cur);
 			}
 		}
-	
-	// mark the entry for the new thread valid
 	} 
-
-	return (cur);		// done, return new thread ID
+	//Printf ("return from create thread is: %d...\n", last_created);
+	return (last_created);		// done, return new thread ID
 }
 /*	MyYieldThread (t) causes the running thread, call it T, to yield to
  *	thread t.  Returns the ID of the thread that yielded to the calling
@@ -110,6 +131,7 @@ int MyCreateThread (func, param)
 int MyYieldThread (t)
 	int t;				// thread being yielded to
 {
+	int me, g;
 	if (! MyInitThreadsCalled) {
 		Printf ("YieldThread: Must call InitThreads first\n");
 		Exit ();
@@ -123,10 +145,19 @@ int MyYieldThread (t)
 		Printf ("YieldThread: Thread %d does not exist\n", t);
 		return (-1);
 	}
+	me = MyGetThread();
+	//Printf("T %d is yielding to T %d...\n", me, t);
+    if ((g = setjmp (thread[me].env)) == 0) {
+    	    thread[t].whoYme = me;
+    	    
+    	    deleteFromQueue(me);
+    	    appendToQueue(me);
 
-        if (setjmp (thread[1-t].env) == 0) {
-                longjmp (thread[t].env, 1);
-        }
+    	    current_run = t;
+    	    //Printf("T %d is yielding to T %d...\n", me, t);
+            longjmp (thread[t].env, t);
+    }
+    return thread[g].whoYme;
 }
 
 /*	MyGetThread () returns ID of currently running thread.  
@@ -138,6 +169,7 @@ int MyGetThread ()
 		Printf ("GetThread: Must call InitThreads first\n");
 		Exit ();
 	}
+	return current_run;
 
 }
 
@@ -149,19 +181,58 @@ int MyGetThread ()
 
 void MySchedThread ()
 {
+	int task;
 	if (! MyInitThreadsCalled) {
 		Printf ("SchedThread: Must call InitThreads first\n");
 		Exit ();
 	}
+
+	task = head;
+	deleteFromQueue(task);
+	appendToQueue(task);
+
+	current_run = task;
+	longjmp(thread[task].env, task);
 }
 
+
+void deleteFromQueue(int me) {
+	if (me == head) {
+		thread[ thread[me].next ].prev = -1;
+		head = thread[me].next;
+	} else if (tail == me) {
+		thread[ thread[me].prev ].next = -1;
+		tail = thread[me].prev;
+	} else {
+		thread[ thread[me].next ].prev = thread[me].prev;
+		thread[ thread[me].prev ].next = thread[me].next;
+	}
+	thread[me].prev = -1;
+	thread[me].next = -1;
+}
+
+void appendToQueue(int me) {
+	thread[tail].next = me;
+	thread[me].prev = tail;
+	tail = me;
+}
 /*	MyExitThread () causes the currently running thread to exit.  
  */
 
 void MyExitThread ()
 {
+	int me = MyGetThread();
 	if (! MyInitThreadsCalled) {
 		Printf ("ExitThread: Must call InitThreads first\n");
+		Exit ();
+	}
+
+	deleteFromQueue(me);
+	thread[me].valid = 0;
+	if (head != tail) {
+		MySchedThread();
+	} 
+	else {
 		Exit ();
 	}
 }
