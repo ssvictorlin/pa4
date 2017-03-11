@@ -9,10 +9,13 @@
 #include "mythreads.h"
 
 static int MyInitThreadsCalled = 0;	// 1 if MyInitThreads called, else 0
-
+static int next_avail = 1;
+static int current_create = 0;
 static struct thread {			// thread table
 	int valid;			// 1 if entry is valid, else 0
-	jmp_buf env;			// current context
+	jmp_buf env;
+	void (*f)();			// current context
+	int p;
 } thread[MAXTHREADS];
 
 #define STACKSIZE	65536		// maximum size of thread stack
@@ -30,7 +33,26 @@ void MyInitThreads ()
 		Exit ();
 	}
 
-	for (i = 0; i < MAXTHREADS; i++) {	// initialize thread table
+	for (i = 1; i < MAXTHREADS; i++) {	// initialize thread table
+		char s[i * STACKSIZE];
+
+		if (((int) &s[STACKSIZE-1]) - ((int) &s[0]) + 1 != STACKSIZE) {
+			Printf ("Stack space reservation failed\n");
+			Exit ();
+		}
+
+		if (setjmp (thread[i].env) == 0) {
+			// do nothing
+		} else {
+			void (*f)() = thread[i].f;
+			int p = thread[i].p;
+			if (setjmp (thread[i].env) == 0) {
+				longjmp(thread[current_create].env, current_create);
+			} 
+
+			(*f)(p);
+			MyExitThread();
+		}
 		thread[i].valid = 0;
 	}
 
@@ -49,49 +71,33 @@ int MyCreateThread (func, param)
 	void (*func)();			// function to be executed
 	int param;			// integer parameter
 {
+	int i, cur, me;
 	if (! MyInitThreadsCalled) {
 		Printf ("CreateThread: Must call InitThreads first\n");
 		Exit ();
 	}
-
-	if (setjmp (thread[0].env) == 0) {	// save context of thread 0
-
-		/* The new thread will need stack space.  Here we use the
-		 * following trick: the new thread simply uses the current
-		 * stack, and so there is no need to allocate space.  However,
-		 * to ensure that thread 0's stack may grow and (hopefully)
-		 * not bump into thread 1's stack, the top of the stack is
-		 * effectively extended automatically by declaring a local
-		 * variable (a large "dummy" array). This array is never
-		 * actually used; to prevent an optimizing compiler from
-		 * removing it, it should be referenced.  
-		 */
-
-		char s[STACKSIZE];	// reserve space for thread 0's stack
-		void (*f)() = func;	// f saves func on top of stack
-		int p = param;		// p saves param on top of stack
-
-		if (((int) &s[STACKSIZE-1]) - ((int) &s[0]) + 1 != STACKSIZE) {
-			Printf ("Stack space reservation failed\n");
-			Exit ();
+	current_create = MyGetThread();
+	if (setjmp(thread[current_create].env) == 0) {
+		// find the available postion to create thread
+		while (1) {
+			if (thread[next_avail].valid) {
+				next_avail = (next_avail+1)%10;
+			} 
+			else {
+				cur = next_avail;
+				next_avail = (next_avail+1)%10;
+				thread[cur].valid = 1;
+				thread[cur].f = func;
+				thread[cur].p = param;
+				longjmp(thread[cur].env, cur);
+			}
 		}
+	
+	// mark the entry for the new thread valid
+	} 
 
-		if (setjmp (thread[1].env) == 0) {	// save context of 1
-			longjmp (thread[0].env, 1);	// back to thread 0
-		}
-
-		/* here when thread 1 is scheduled for the first time */
-
-		(*f) (p);			// execute func (param)
-
-		MyExitThread ();		// thread 1 is done - exit
-	}
-
-	thread[1].valid = 1;	// mark the entry for the new thread valid
-
-	return (1);		// done, return new thread ID
+	return (cur);		// done, return new thread ID
 }
-
 /*	MyYieldThread (t) causes the running thread, call it T, to yield to
  *	thread t.  Returns the ID of the thread that yielded to the calling
  *	thread T, or -1 if t is an invalid ID. Example: given two threads
