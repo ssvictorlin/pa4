@@ -3,7 +3,7 @@
  */
 
 #include <setjmp.h>
-
+#include <string.h>
 #include "aux.h"
 #include "umix.h"
 #include "mythreads.h"
@@ -13,12 +13,14 @@ static int next_avail = 1;
 static int last_created = 0;
 static int current_create = 0;
 static int current_run = 0;
+static int number = 1;
 static int head = 0;
 static int tail = 0;
 
 static struct thread {			// thread table
 	int valid;			// 1 if entry is valid, else 0
 	jmp_buf env;
+	jmp_buf clean;
 	void (*f)();			// current context
 	int p;
 
@@ -43,35 +45,47 @@ void MyInitThreads ()
 		Printf ("InitThreads: should be called only once\n");
 		Exit ();
 	}
-	for (i = 1; i < MAXTHREADS; i++) {	// initialize thread table
+	for (i = 0; i < MAXTHREADS; i++) {	// initialize thread table
 		char s[i * STACKSIZE];
 
 		if (((int) &s[STACKSIZE-1]) - ((int) &s[0]) + 1 != STACKSIZE) {
 			Printf ("Stack space reservation failed\n");
 			Exit ();
 		}
-
+		// jump from createThread()
 		if ((g = setjmp (thread[i].env)) == 0) {
-			// do nothing
+			// make a copy of a clean env
+			memcpy(thread[i].clean, thread[i].env, sizeof thread[i].env);
 		} else {
-			
+			if (g == 11) g = 0;
 			void (*f)() = thread[g].f;
 			int p = thread[g].p;
+			// jump back from yieldThread()
+			//DPrintf ("Thread %d has been set its function...\n", g);
 			if ((h = setjmp (thread[g].env)) == 0) {
+				//DPrintf("Come in...and the h is: %d, and it's jumpin to %d ...\n", h, current_create);
 				longjmp(thread[current_create].env, current_create);
-			} 
-			
-			thread[h].f(thread[h].p);
-			MyExitThread();
+			} else {
+				// when yielded back, run the function
+				if (h == 11) h = 0;
+				//DPrintf ("Thread %d is running its function...\n", h);
+				thread[h].f(thread[h].p);
+				MyExitThread();
+			}
 		}
-		thread[i].valid = 0;
+		// run when called init
+		if (i == 0) { 
+			thread[i].valid = 1; 
+		} else {
+			thread[i].valid = 0; 
+		}
 		thread[i].prev = -1;
 		thread[i].next = -1;
 	}
-	//Printf("Thread 0 is initialized...\n");
+	/*//Printf("Thread 0 is initialized...\n");
 	thread[0].valid = 1;			// initialize thread 0
 	thread[0].prev = -1;
-	thread[0].next = -1;
+	thread[0].next = -1;*/
 
 	MyInitThreadsCalled = 1;
 }
@@ -86,13 +100,14 @@ int MyCreateThread (func, param)
 	void (*func)();			// function to be executed
 	int param;			// integer parameter
 {
-	int i, cur, me;
+	int i, cur, me, m;
 	if (! MyInitThreadsCalled) {
 		Printf ("CreateThread: Must call InitThreads first\n");
 		Exit ();
 	}
+	// get current running thread
 	current_create = MyGetThread();
-	//Printf ("current_create thread is: %d...\n", current_create);
+	//DPrintf ("current thread is: %d...\n", current_create);
 	if (setjmp(thread[current_create].env) == 0) {
 		// find the available postion to create thread
 		while (1) {
@@ -104,15 +119,18 @@ int MyCreateThread (func, param)
 				last_created = cur;
 				next_avail = (next_avail+1)%10;
 				// append to the tail of the queue
-				thread[tail].next = cur;
-				thread[cur].prev = tail;
-				tail = cur;
+				appendToQueue(cur);
 				// mark the entry for the new thread valid
 				thread[cur].valid = 1;
 				thread[cur].f = func;
 				thread[cur].p = param;
-				//Printf ("created thread is: %d...\n", cur);
-				longjmp(thread[cur].env, cur);
+				//memcpy(thread[cur].env, thread[cur].clean, sizeof thread[cur].clean);
+				number++;
+				DPrintf ("created thread is: %d...and how many: %d ...\n", cur, number);
+				// take care the thread 0 problem
+				m = cur;
+				if (cur == 0) m = 11;
+				longjmp(thread[cur].env, m);
 			}
 		}
 	} 
@@ -170,7 +188,6 @@ int MyGetThread ()
 		Exit ();
 	}
 	return current_run;
-
 }
 
 /*	MySchedThread () causes the running thread to simply give up the
@@ -181,7 +198,7 @@ int MyGetThread ()
 
 void MySchedThread ()
 {
-	int task;
+	int task, m;
 	if (! MyInitThreadsCalled) {
 		Printf ("SchedThread: Must call InitThreads first\n");
 		Exit ();
@@ -192,7 +209,11 @@ void MySchedThread ()
 	appendToQueue(task);
 
 	current_run = task;
-	longjmp(thread[task].env, task);
+	//DPrintf ("scheduled thread is: %d...\n", task);
+	// take care the thread 0 problem
+	m = task;
+	if (task == 0) m = 11;
+	longjmp(thread[task].env, m);
 }
 
 
@@ -228,8 +249,13 @@ void MyExitThread ()
 	}
 
 	deleteFromQueue(me);
+	//DPrintf("Deleting thread %d...\n", me);
 	thread[me].valid = 0;
-	if (head != tail) {
+	memcpy(thread[me].env, thread[me].clean, sizeof thread[me].clean);
+	//DPrintf("Deleting thread %d...\n", me);
+	--number;
+	//DPrintf("%d threads are running...\n", number);
+	if (number > 0) {
 		MySchedThread();
 	} 
 	else {
