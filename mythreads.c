@@ -101,7 +101,7 @@ int MyCreateThread (func, param)
 	void (*func)();			// function to be executed
 	int param;			// integer parameter
 {
-	int i, cur, me, m;
+	int i, cur, me, m, count;
 	if (! MyInitThreadsCalled) {
 		Printf ("CreateThread: Must call InitThreads first\n");
 		Exit ();
@@ -109,6 +109,7 @@ int MyCreateThread (func, param)
 	// get current running thread
 	current_create = MyGetThread();
 	//DPrintf ("current thread is: %d...\n", current_create);
+	count = 10;
 	if (setjmp(thread[current_create].env) == 0) {
 		// find the available postion to create thread
 		while (1) {
@@ -133,6 +134,10 @@ int MyCreateThread (func, param)
 				m = cur;
 				if (cur == 0) m = 11;
 				longjmp(thread[cur].env, m);
+			}
+			if (count-- <= 0) {
+				last_created = -1;
+				break;
 			}
 		}
 	} 
