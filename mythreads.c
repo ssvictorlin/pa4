@@ -156,7 +156,7 @@ int MyCreateThread (func, param)
 int MyYieldThread (t)
 	int t;				// thread being yielded to
 {
-	int me, g;
+	int me, g, m;
 	if (! MyInitThreadsCalled) {
 		Printf ("YieldThread: Must call InitThreads first\n");
 		Exit ();
@@ -181,8 +181,11 @@ int MyYieldThread (t)
     	    current_run = t;
     	    //Printf("T %d is yielding to T %d...\n", me, t);
     	    //PrintQ();
-            longjmp (thread[t].env, t);
+    	    m = t;
+    	    if (m == 0) m = 11;
+            longjmp (thread[t].env, m);
     }
+    if (g == 11) g = 0;
     return thread[g].whoYme;
 }
 
