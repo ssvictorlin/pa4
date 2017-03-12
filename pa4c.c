@@ -126,7 +126,7 @@ void Main ()
 	void printSquares (), printCubes ();
 
 	MyInitThreads ();
-	
+
 	me = MyGetThread ();                    // thread 0
         t = MyCreateThread (printSquares, 1);  // thread 1
         Printf("        *just created %d\n", t);
@@ -147,7 +147,7 @@ void Main ()
         Printf("        *just created %d\n", t);
         t = MyCreateThread (printSquares, 0);  // thread 9
         Printf("        *just created %d\n", t);
-        //DPrintf("        *just created %d\n", t);
+        DPrintf("        *just created %d\n", t);
 
 	for (i = 0; i < NUMYIELDS; i++) {
 		MyYieldThread (t);

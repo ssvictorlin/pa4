@@ -33,6 +33,7 @@ static struct thread {			// thread table
 #define STACKSIZE	65536		// maximum size of thread stack
 void deleteFromQueue(int);
 void appendToQueue(int);
+void PrintQ();
 /*	MyInitThreads () initializes the thread package. Must be the first
  *	function called by any user program that uses the thread package.  
  */
@@ -120,13 +121,14 @@ int MyCreateThread (func, param)
 				next_avail = (next_avail+1)%10;
 				// append to the tail of the queue
 				appendToQueue(cur);
+				//PrintQ();
 				// mark the entry for the new thread valid
 				thread[cur].valid = 1;
 				thread[cur].f = func;
 				thread[cur].p = param;
 				//memcpy(thread[cur].env, thread[cur].clean, sizeof thread[cur].clean);
 				number++;
-				DPrintf ("created thread is: %d...and how many: %d ...\n", cur, number);
+				//DPrintf ("created thread is: %d...and how many: %d ...\n", cur, number);
 				// take care the thread 0 problem
 				m = cur;
 				if (cur == 0) m = 11;
@@ -173,6 +175,7 @@ int MyYieldThread (t)
 
     	    current_run = t;
     	    //Printf("T %d is yielding to T %d...\n", me, t);
+    	    //PrintQ();
             longjmp (thread[t].env, t);
     }
     return thread[g].whoYme;
@@ -218,24 +221,40 @@ void MySchedThread ()
 
 
 void deleteFromQueue(int me) {
-	if (me == head) {
-		thread[ thread[me].next ].prev = -1;
-		head = thread[me].next;
-	} else if (tail == me) {
-		thread[ thread[me].prev ].next = -1;
-		tail = thread[me].prev;
+	//DPrintf("delete thread %d from queue...\n", me);
+	if (number > 1) { 
+		if (me == head) {
+			thread[ thread[me].next ].prev = -1;
+			head = thread[me].next;
+		} else if (tail == me) {
+			thread[ thread[me].prev ].next = -1;
+			tail = thread[me].prev;
+		} else {
+			thread[ thread[me].next ].prev = thread[me].prev;
+			thread[ thread[me].prev ].next = thread[me].next;
+		}
+		thread[me].prev = -1;
+		thread[me].next = -1;
 	} else {
-		thread[ thread[me].next ].prev = thread[me].prev;
-		thread[ thread[me].prev ].next = thread[me].next;
+		thread[me].prev = -1;
+		thread[me].next = -1;
+		head = -1;
+		tail = -1;
 	}
-	thread[me].prev = -1;
-	thread[me].next = -1;
+	//PrintQ();
 }
 
 void appendToQueue(int me) {
-	thread[tail].next = me;
-	thread[me].prev = tail;
-	tail = me;
+	//DPrintf("append thread %d to tail thread %d...\n", me, tail);
+	if (head == -1) {
+		head = me;
+		tail = me;
+	} else {
+		thread[tail].next = me;
+		thread[me].prev = tail;
+		tail = me;
+	}
+	//PrintQ();
 }
 /*	MyExitThread () causes the currently running thread to exit.  
  */
@@ -255,10 +274,21 @@ void MyExitThread ()
 	//DPrintf("Deleting thread %d...\n", me);
 	--number;
 	//DPrintf("%d threads are running...\n", number);
+	//PrintQ();
 	if (number > 0) {
 		MySchedThread();
 	} 
 	else {
 		Exit ();
 	}
+}
+
+void PrintQ() {
+	int idx = head;
+	DPrintf("Queue is like: head");
+	while (idx != -1) {
+		DPrintf("| %d ", idx);
+		idx = thread[idx].next;
+	}
+	DPrintf("tail is: %d \n", tail);
 }
