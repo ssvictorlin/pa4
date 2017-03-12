@@ -16,6 +16,7 @@ static int current_run = 0;
 static int number = 1;
 static int head = 0;
 static int tail = 0;
+static int fromExit = 0;
 
 static struct thread {			// thread table
 	int valid;			// 1 if entry is valid, else 0
@@ -209,18 +210,23 @@ int MyGetThread ()
 
 void MySchedThread ()
 {
-	int task, m;
+	int task, me, m;
 	if (! MyInitThreadsCalled) {
 		Printf ("SchedThread: Must call InitThreads first\n");
 		Exit ();
 	}
-
+	if (fromExit == 0) {
+		me = MyGetThread();
+		deleteFromQueue(me);
+		appendToQueue(me);
+	} 
 	task = head;
 	deleteFromQueue(task);
 	appendToQueue(task);
 
 	current_run = task;
 	//DPrintf ("scheduled thread is: %d...\n", task);
+	fromExit = 0; 
 	// take care the thread 0 problem
 	m = task;
 	if (task == 0) m = 11;
@@ -284,6 +290,7 @@ void MyExitThread ()
 	//DPrintf("%d threads are running...\n", number);
 	//PrintQ();
 	if (number > 0) {
+		fromExit = 1;
 		MySchedThread();
 	} 
 	else {
