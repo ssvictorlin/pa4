@@ -210,7 +210,7 @@ int MyGetThread ()
 
 void MySchedThread ()
 {
-	int task, me, m;
+	int task, me, m, g;
 	if (! MyInitThreadsCalled) {
 		Printf ("SchedThread: Must call InitThreads first\n");
 		Exit ();
@@ -219,18 +219,20 @@ void MySchedThread ()
 		me = MyGetThread();
 		deleteFromQueue(me);
 		appendToQueue(me);
-	} 
-	task = head;
-	deleteFromQueue(task);
-	appendToQueue(task);
+	}
+	if ((g = setjmp (thread[me].env)) == 0) { 
+		task = head;
+		deleteFromQueue(task);
+		appendToQueue(task);
 
-	current_run = task;
-	//DPrintf ("scheduled thread is: %d...\n", task);
-	fromExit = 0; 
-	// take care the thread 0 problem
-	m = task;
-	if (task == 0) m = 11;
-	longjmp(thread[task].env, m);
+		current_run = task;
+		//Printf ("scheduled thread is: %d...\n", task);
+		fromExit = 0; 
+		// take care the thread 0 problem
+		m = task;
+		if (task == 0) m = 11;
+		longjmp(thread[task].env, m);
+	}
 }
 
 
